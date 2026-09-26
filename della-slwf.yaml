@@ -1,7 +1,7 @@
 # =============================================================================
 # della-slwf.yaml — personal Della 048-MS build (developed on SMLIGHT SLWF-01)
 #
-# Adds real Wi-Fi, an encrypted native API, and an OTA password (all from
+# Adds real Wi-Fi, an encrypted native API, and encrypted OTA (all from
 # secrets.yaml) to the shared firmware body in della-ac.base.yaml. This is the
 # build you flash for day-to-day use:  `esphome run della-slwf.yaml`.
 #
@@ -9,8 +9,8 @@
 # =============================================================================
 
 esphome:
-  name: della-slwf
-  friendly_name: Della Mini Split
+  name: della-dining
+  friendly_name: Della Dining Room
   # Firmware requires features from this ESPHome release or newer; older
   # versions fail validation. CI pins the exact build (see .github/workflows).
   min_version: 2026.5.3
@@ -22,7 +22,7 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "della-slwf Fallback"
+    ssid: "della-dining"
     password: !secret fallback_ap_password
 
 api:
@@ -31,4 +31,5 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret ota_password
+    encryption:
+      key: !secret api_encryption_key
