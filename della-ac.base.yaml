@@ -46,6 +46,9 @@ logger:
   # per-frame detail at runtime without a reflash.
   level: INFO
 
+debug:
+  update_interval: 60s
+
 # Fallback hotspot + on-device Wi-Fi provisioning page. The entry files supply
 # the matching `wifi:` block (real credentials, or the release AP).
 captive_portal:
@@ -81,6 +84,9 @@ globals:
     type: int
     initial_value: '0'
   - id: indoor_reported
+    type: float
+    initial_value: 'NAN'
+  - id: indoor_avg
     type: float
     initial_value: 'NAN'
   - id: last_rx_ms
@@ -205,10 +211,16 @@ remote_receiver:
             if (id(verbose_logs).state) id(last_status_frame).publish_state(hex);
             id(ac_fan_code).publish_state(data[13]);
             float indoor = (float) data[15] - 0x20 + (data[31] & 0x0F) / 10.0f;
-            // Deadband: the unit dithers 0.1 °C across a boundary every few
-            // seconds; pass on only moves of 0.2 °C or more.
-            if (std::isnan(id(indoor_reported)) || fabsf(indoor - id(indoor_reported)) > 0.15f)
-              id(indoor_reported) = indoor;
+            // Smooth, then deadband: the unit's reading wanders up to 0.2 °C
+            // back and forth; the ~40 s average settles it, the deadband stops
+            // 0.1 °C rounding flips.
+            if (std::isnan(id(indoor_avg)))
+              id(indoor_avg) = indoor;
+            else
+              id(indoor_avg) += 0.05f * (indoor - id(indoor_avg));
+            float smoothed = roundf(id(indoor_avg) * 10.0f) / 10.0f;
+            if (std::isnan(id(indoor_reported)) || fabsf(smoothed - id(indoor_reported)) > 0.15f)
+              id(indoor_reported) = smoothed;
             id(indoor_temp).publish_state(id(indoor_reported));
             id(coil_temp).publish_state((float) data[16] - 0x20);
             id(outdoor_temp).publish_state((float) data[20] - 0x20);
@@ -538,6 +550,10 @@ sensor:
     update_interval: never
 
 text_sensor:
+  - platform: debug
+    reset_reason:
+      name: "Reset reason"
+      entity_category: diagnostic
   - platform: template
     name: "Fan speed"
     id: fan_actual_txt
