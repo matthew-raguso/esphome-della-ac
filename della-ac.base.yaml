@@ -46,6 +46,9 @@ logger:
   # per-frame detail at runtime without a reflash.
   level: INFO
 
+debug:
+  update_interval: 60s
+
 # Fallback hotspot + on-device Wi-Fi provisioning page. The entry files supply
 # the matching `wifi:` block (real credentials, or the release AP).
 captive_portal:
@@ -54,14 +57,12 @@ captive_portal:
 # USB-C serial link right after install, on top of the captive-portal AP.
 improv_serial:
 
-# Debug dashboard at the device's IP: live entity states + log stream. It is
-# unauthenticated on the LAN; web-based OTA is disabled (use the native
-# ESPHome OTA), so the page is view/control only.
-web_server:
-  port: 80
-  version: 3
-  local: true
-  ota: false
+# Optional unauthenticated LAN debug UI; uncomment when needed.
+# web_server:
+#   port: 80
+#   version: 3
+#   local: true
+#   ota: false
 
 # TX-only UART to the AC (GPIO12 -> USB D+ -> AC RX). 4800 8E1.
 uart:
@@ -82,6 +83,12 @@ globals:
   - id: bad_frame_count
     type: int
     initial_value: '0'
+  - id: indoor_reported
+    type: float
+    initial_value: 'NAN'
+  - id: indoor_avg
+    type: float
+    initial_value: 'NAN'
   - id: last_rx_ms
     type: uint32_t
     initial_value: '0'
@@ -203,13 +210,23 @@ remote_receiver:
             id(status_count) += 1;
             if (id(verbose_logs).state) id(last_status_frame).publish_state(hex);
             id(ac_fan_code).publish_state(data[13]);
-            id(indoor_temp).publish_state((float) data[15] - 0x20 + (data[31] & 0x0F) / 10.0f);
+            float indoor = (float) data[15] - 0x20 + (data[31] & 0x0F) / 10.0f;
+            // Smooth, then deadband: the unit's reading wanders up to 0.2 °C
+            // back and forth; the ~40 s average settles it, the deadband stops
+            // 0.1 °C rounding flips.
+            if (std::isnan(id(indoor_avg)))
+              id(indoor_avg) = indoor;
+            else
+              id(indoor_avg) += 0.05f * (indoor - id(indoor_avg));
+            float smoothed = roundf(id(indoor_avg) * 10.0f) / 10.0f;
+            if (std::isnan(id(indoor_reported)) || fabsf(smoothed - id(indoor_reported)) > 0.15f)
+              id(indoor_reported) = smoothed;
+            id(indoor_temp).publish_state(id(indoor_reported));
             id(coil_temp).publish_state((float) data[16] - 0x20);
             id(outdoor_temp).publish_state((float) data[20] - 0x20);
             id(compressor_temp).publish_state((float) data[22] - 0x20);
             id(inverter_power).publish_state(data[24]);
-            id(della_thermostat).ingest_big((float) data[15] - 0x20 + (data[31] & 0x0F) / 10.0f,
-                                            data[24], data[13]);
+            id(della_thermostat).ingest_big(id(indoor_reported), data[24], data[13]);
             return;
           }
 
@@ -533,6 +550,10 @@ sensor:
     update_interval: never
 
 text_sensor:
+  - platform: debug
+    reset_reason:
+      name: "Reset reason"
+      entity_category: diagnostic
   - platform: template
     name: "Fan speed"
     id: fan_actual_txt
